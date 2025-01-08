@@ -1,18 +1,16 @@
-/* eslint-env node */
-/* eslint no-console: 0 */
-"use strict";
-// For RunKit:
-const hyphenopoly = require("hyphenopoly");
+import hyphenopoly from "../hyphenopoly.module.js";
+import {readFileSync} from "node:fs";
 
-// For local node:
-// const hyphenopoly = require("../hyphenopoly.module.js");
-
+function loaderSync(file, patDir) {
+    return readFileSync(new URL(file, patDir));
+}
 
 const hyphenator = hyphenopoly.config({
     "exceptions": {
         "en-us": "en-han-ces"
     },
     "hyphen": "•",
+    loaderSync,
     "require": ["de", "en-us"],
     "sync": true
 });

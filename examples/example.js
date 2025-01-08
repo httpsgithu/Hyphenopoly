@@ -3,14 +3,15 @@
 
 import hyphenopoly from "../hyphenopoly.module.js";
 
-// For local node:
-// import hyphenopoly from "../hyphenopoly.module.js";
-
 const hyphenator = hyphenopoly.config({
     "exceptions": {
         "en-us": "en-han-ces"
     },
     "hyphen": "•",
+    "loader": async (file, patDir) => {
+        const {readFile} = await import("node:fs/promises");
+        return readFile(new URL(file, patDir));
+    },
     "require": ["de", "en-us"]
 });
 

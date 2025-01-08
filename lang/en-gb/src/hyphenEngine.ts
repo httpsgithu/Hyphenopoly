@@ -27,23 +27,20 @@
  * #--------------------# <- 192 (hp)
  * |    hyphenPoints    |
  * |  64 * Uint8 = 64B  |
- * #--------------------# <- 256 (translateMapOffset)
- * |    translateMap    |
- * |         keys:      |
- * | 256 chars * 2Bytes |
- * |          +         |
- * |       values:      | 1024B
- * | 256 chars * 1Byte  |
- * |          +         |
- * |     collisions:    |
- * | 64 buckets * 4Byte |
- * #--------------------# <- 1280 (alphabetOffset)
- * |      alphabet      |
- * | 256 chars * 2Bytes | 512B
- * #--------------------# <- 1792 (originalWordOffset)
+ * #--------------------# <- 256 (originalWordOffset)
  * |    originalWord    |
  * | 64 * Uint16 = 128B |
- * #--------------------# <- 1920   - DATAOFFSET
+ * #--------------------# <- 384 (translateMapOffset)
+ * |    translateMap    |
+ * |      key/value:    |
+ * | 256 chars * 4Bytes |
+ * |          +         | 1280B
+ * |     collisions:    |
+ * | 64 buckets * 4Byte |
+ * #--------------------# <- 1664 (alphabetOffset)
+ * |      alphabet      |
+ * | 256 chars * 2Bytes | 512B
+ * #--------------------# <- 2176   - DATAOFFSET
  * |      licence       |           |
  * #--------------------#           |
  * |      alphabet      |    (ao)   |
@@ -96,9 +93,9 @@ export let lct: i32 = 0;
  */
 const tw: i32 = 128;
 const hp: i32 = 192;
-const translateMapOffset:i32 = 256;
-const alphabetOffset: i32 = 1280;
-const originalWordOffset: i32 = 1792;
+const originalWordOffset: i32 = 256;
+const translateMapOffset:i32 = 384;
+const alphabetOffset: i32 = 1664;
 
 /*
  * Minimalistic hash function to map 16-bit to 8-bit
@@ -116,23 +113,18 @@ function hashCharCode(cc: i32): i32 {
  * v is it's 8-bit representation
  */
 function pushToTranslateMap(cc: i32, id: i32): void {
-    let ptr: i32 = hashCharCode(cc) << 1;
-    if (load<u16>(ptr, translateMapOffset) === 0) {
-        // No collision
-        store<u16>(ptr, cc, translateMapOffset);
-        store<u8>(ptr >> 1, id, translateMapOffset + 512);
-    } else {
+    let ptr: i32 = hashCharCode(cc) << 2;
+    if (load<u32>(ptr, translateMapOffset) !== 0) {
         // Handle collision
-        ptr = 0;
-        while (load<u16>(ptr, translateMapOffset + 768) !== 0) {
+        ptr = 1024;
+        while (load<u32>(ptr, translateMapOffset) !== 0) {
             ptr += 4;
-            if (ptr >= 256) {
+            if (ptr >= 1280) {
                 unreachable();
             }
         }
-        store<u16>(ptr, cc, translateMapOffset + 768);
-        store<u16>(ptr, id, translateMapOffset + 770);
     }
+    store<u32>(ptr, (cc << 16) + id, translateMapOffset);
 }
 
 /*
@@ -140,25 +132,25 @@ function pushToTranslateMap(cc: i32, id: i32): void {
  * Returns 255 if the char is not in the translateMap
  */
 function pullFromTranslateMap(cc: i32): i32 {
-    let ptr: i32 = hashCharCode(cc) << 1;
-    const val = load<u16>(ptr, translateMapOffset);
+    let ptr: i32 = hashCharCode(cc) << 2;
+    const val = load<u32>(ptr, translateMapOffset);
     if (val === 0) {
         // Unknown char
         return 255;
     }
-    if (val === cc) {
+    if ((val >>> 16) === cc) {
         // Known char
-        return load<u8>(ptr >> 1, translateMapOffset + 512);
+        return (val & 255);
     }
     // Find collided char
     ptr = 0;
-    while (load<u16>(ptr, translateMapOffset + 768) !== cc) {
+    while (load<u16>(ptr, translateMapOffset + 1026) !== cc) {
         ptr += 4;
         if (ptr >= 256) {
             return 255;
         }
     }
-    return load<u16>(ptr, translateMapOffset + 770);
+    return load<u16>(ptr, translateMapOffset + 1024);
 }
 
 /*
@@ -210,17 +202,24 @@ function createTranslateMap(): void {
 
 /*
  * Checks if the bit in hv (hasValueBitMap) is set
- * Returns the bit at pos starting at startByte
- * For our purposes the bits are numbered from left to right
- * but the bytes are stored in Little Endian (3 2 1 0)
- * to access the bytes in Big Endian order (0 1 2 3) we need to calculate
- * the address: numBytes = (numBytes - (numBytes % 4) + 3) - (numBytes % 4)
- * This can be simplyfied as follows
+ * Returns the bit at pos starting at hv.
+ *
+ * When the succinct trie is created (see tools/modules/sTrie.js and
+ * tools/modules/bits.js) the bytes are swapped (0 1 2 3 -> 3 2 1 0).
+ * This is intended because we access them in the select and rank functions
+ * with i64 instructions; wasm is little-endian and thus loads 0 1 2 3.
+ * But here the bits are numbered from left to right, so we need to swap the
+ * pointer to the byte.
+ * To access the bytes in Big Endian order (0 1 2 3) we need to calculate
+ * the address: bytePtr = (bytePtr - (bytePtr % 4) + 3) - (bytePtr % 4)
+ *                      =  bytePtr + 3 - (2 * (bytePtr % 4))
+ * with BitHack (bytePtr % 4) === bytePtr & (4 - 1)
+ *              bytePtr =  bytePtr + 3 - ((bytePtr & 3) << 1)
  */
 function nodeHasValue(pos: i32): i32 {
-    // BE:
+    // BE bytePointer = pos / 8;
     let bytePtr: i32 = pos >> 3;
-    // LE:
+    // LE bytePointer:
     bytePtr = bytePtr + 7 - ((bytePtr & 7) << 1);
     // BitHack: pos % 8 === pos & (8 - 1)
     const numBits: i32 = 7 - (pos & 7);
@@ -228,50 +227,47 @@ function nodeHasValue(pos: i32): i32 {
 }
 
 /*
- * Computes the rank at pos starting at startByte.
+ * Computes the rank at pos starting at currByte.
  * The rank is the number of bits set up to the given position.
- * We first count the bits set in the 32-bit blocks,
+ * We first count the bits set in the 64-bit blocks,
  * then we count the bits set until the final pos.
  */
-function rank(pos: i32, startByte: i32): i32 {
+function rank(pos: i32, currByte: i32): i32 {
+    let count: i64 = 0;
     // (pos / 64) << 3 === (pos >> 6) << 3
     const numBytes: i32 = (pos >> 6) << 3;
+    const endByte: i32 = currByte + numBytes;
+    while (currByte < endByte) {
+        count += popcnt<i64>(load<i64>(currByte, 0, 8));
+        currByte += 8;
+    }
     // BitHack: pos % 64 === pos & (64 - 1)
     const numBits: i32 = pos & 63;
-    let i: i32 = 0;
-    let count: i64 = 0;
-    while (i < numBytes) {
-        count += popcnt<i64>(load<i64>(startByte + i, 0, 8));
-        i += 8;
-    }
     if (numBits !== 0) {
         count += popcnt<i64>(
-            load<i64>(startByte + i, 0, 8) >>> (64 - numBits)
+            load<i64>(currByte, 0, 8) >>> (64 - numBits)
         );
     }
     return count as i32;
 }
 
-function get1PosInDWord(dWord: i64, nth: i32): i32 {
-    const first: i32 = (dWord >> 32) as i32;
-    const pcntf: i32 = popcnt<i32>(first);
-    let word: i32 = 0;
-    let pos: i32 = -1;
-    if (pcntf >= nth) {
-        word = first;
-    } else {
-        word = (dWord & 0xFFFFFFFF) as i32;
-        nth -= pcntf;
-        pos = 31;
-    }
-    let shift: i32 = 0;
+/**
+ * Find the position of the nth 0 in a 64bit word.
+ * The algorithm numbers bits from right to left, but we need them numbered
+ * from left to right, so we convert nth (l2r)  to nth2 (r2l).
+ * @param {i64} dWord - doubleWord sized bit vector to be searched
+ * @param {i32} nth - nth 0 to get the position of
+ * @returns {i32} - index of the nth 0 in dWord
+ */
+function get0PosInDWord(dWord: i64, nth: i32): i32 {
+    let nth2: i64 = 65 - popcnt<i64>(dWord) - nth;
+    let dwn: i64 = dWord;
     do {
-        shift = clz<i32>(word) + 1;
-        word <<= shift;
-        pos += shift;
-        nth -= 1;
-    } while (nth);
-    return pos;
+        dWord |= dwn;
+        dwn = dWord + 1;
+        nth2 -= 1;
+    } while (nth2);
+    return 63 - (ctz<i64>(dwn) as i32);
 }
 
 /**
@@ -280,6 +276,10 @@ function get1PosInDWord(dWord: i64, nth: i32): i32 {
  * The return values are compacted in one i32 number:
  * bits 0-23: position
  * bits 24-31: child count
+ * @param {i32} ith - number of the 0 to select
+ * @param {i32} startByte - memory index where to start
+ * @param {i32} endByte - memory index where to end if not found yet
+ * @returns {i32} - position and childcount
  */
 function select(ith: i32, startByte: i32, endByte: i32): i32 {
     let bytePos: i32 = startByte;
@@ -290,27 +290,25 @@ function select(ith: i32, startByte: i32, endByte: i32): i32 {
     let posInByte: i32 = 0;
     let pos: i32 = 0;
     let firstPos: i32 = 0;
-
-    do {
+  
+    while (run < 2) {
         ith += run;
-        do {
+        while (count < ith) {
             if (bytePos > endByte) {
                 return 0;
             }
-            dWord = ~load<i64>(bytePos, 0, 8);
-            dWord0Count = <i32>popcnt<i64>(dWord);
+            dWord = load<i64>(bytePos, 0, 8);
+            dWord0Count = 64 - (popcnt<i64>(dWord) as i32);
             count += dWord0Count;
             bytePos += 8;
-        } while (count < ith);
-        count -= dWord0Count;
-        bytePos -= 8;
-        posInByte = get1PosInDWord(dWord, ith - count);
-        pos = ((bytePos - startByte) << 3) + posInByte;
+        }
+        posInByte = get0PosInDWord(dWord, ith - (count - dWord0Count));
+        pos = ((bytePos - 8 - startByte) << 3) + posInByte;
         if (run === 0) {
             firstPos = pos;
         }
         run += 1;
-    } while (run < 2);
+    }
     return (firstPos << 8) + (pos - firstPos - 1);
 }
 
@@ -385,52 +383,53 @@ export function hyphenate(lmin: i32, rmin: i32, hc: i32): i32 {
     let charOffset: i32 = 0;
     let hyphenPointsCount: i32 = 0;
 
-    // Translate UTF16 word to internal ints and clear hpPos-Array
+    /*
+     * Translate UTF16 word to internal ints and clear hpPos-Array.
+     * The translated word (tw) is delimited by the point char (.)
+     * with charcode 46 which is always translated to the internal
+     * code 0. We don't need to set these delimiters because memory
+     * is initialized with 0.
+     */
+    memory.fill(tw, 0, 256);
     let cc: i32 = load<u16>(0);
     while (cc !== 0) {
         const translatedChar: i32 = pullFromTranslateMap(cc);
         if (translatedChar === 255) {
             return 0;
         }
-        store<u8>(charOffset, translatedChar, tw);
+        store<u8>(charOffset + 1, translatedChar, tw);
         store<u16>(charOffset << 1, cc, originalWordOffset);
         charOffset += 1;
-        store<u8>(charOffset, 0, hp);
         cc = load<u16>(charOffset << 1);
     }
-    store<u16>(charOffset << 1, 0, originalWordOffset);
+
     // Find patterns and collect hyphenPoints
-    wordLength = charOffset;
+    wordLength = charOffset + 2;
     while (patternStartPos < wordLength) {
         charOffset = patternStartPos;
-        let currNode: i32 = 0;
-        let nthChildIdx: i32 = 0;
+        let node: i32 = 1;
         while (charOffset < wordLength) {
-            const sel0: i32 = select(currNode + 1, bm, cm);
-            const firstChild: i32 = (sel0 >> 8) - currNode;
-            const childCount: i32 = sel0 & 255;
-            let nthChild: i32 = 0;
-            while (nthChild < childCount) {
-                nthChildIdx = firstChild + nthChild;
-                if (
-                    load<u8>(nthChildIdx - 1, cm) === load<u8>(charOffset, tw)
-                ) {
+            const sel0: i32 = select(node, bm, cm);
+            node = (sel0 >> 8) - node;
+            const to: i32 = node + (sel0 & 255);
+            while (node < to) {
+                if (load<u8>(node, cm) === load<u8>(charOffset, tw)) {
                     break;
                 }
-                nthChild += 1;
+                node += 1;
             }
-            if (nthChild === childCount) {
+            if (node === to) {
                 break;
             }
-            currNode = nthChildIdx;
-            if (nodeHasValue(currNode - 1) === 1) {
-                const pos: i32 = rank(currNode, hv);
+            if (nodeHasValue(node) === 1) {
+                const pos: i32 = rank(node + 1, hv);
                 const sel: i32 = select(pos, vm, va - 1);
                 const valBitsStart: i32 = sel >> 8;
                 const valIdx: i32 = rank(valBitsStart, vm);
                 const len: i32 = sel & 255;
                 extractValuesToHp(valIdx, len, patternStartPos);
             }
+            node += 2;
             charOffset += 1;
         }
         patternStartPos += 1;
@@ -443,7 +442,7 @@ export function hyphenate(lmin: i32, rmin: i32, hc: i32): i32 {
     while (charOffset < wordLength) {
         store<u16>(
             (charOffset + hyphenPointsCount) << 1,
-            load<u16>(charOffset << 1, originalWordOffset + 2)
+            load<u16>(charOffset << 1, originalWordOffset)
         );
         if ((charOffset >= lmin - 1) && (charOffset <= rmin)) {
             if (load<u8>(charOffset, hp + 2) & 1) {
