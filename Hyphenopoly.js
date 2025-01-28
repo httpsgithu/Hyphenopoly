@@ -1,9 +1,9 @@
 /**
- * @license Hyphenopoly 5.0.0-beta.5 - client side hyphenation for webbrowsers
- * ©2022  Mathias Nater, Güttingen (mathiasnater at gmail dot com)
+ * @license MIT
+ * Hyphenopoly 6.0.0 - client side hyphenation for webbrowsers
+ * ©2024  Mathias Nater, Güttingen (mathiasnater at gmail dot com)
  * https://github.com/mnater/Hyphenopoly
  *
- * Released under the MIT license
  * http://mnater.github.io/Hyphenopoly/LICENSE
  */
 
@@ -41,8 +41,15 @@
             });
         }
         return {
-            "fire": ((eventName, eventData) => {
+
+            /**
+             * Fires the event
+             * @param {string} eventName - id of the event
+             * @param {object} eventData - data that comes with the event
+             */
+            "fire": ((eventName, eventData = {}) => {
                 eventData.runDefault = true;
+                // eslint-disable-next-line jsdoc/require-jsdoc
                 eventData.preventDefault = () => {
                     eventData.runDefault = false;
                 };
@@ -55,7 +62,7 @@
 
     /**
      * Register copy event on element
-     * @param {Object} el The element
+     * @param {object} el The element
      * @returns {undefined}
      */
     function registerOnCopy(el) {
@@ -76,13 +83,13 @@
     /**
      * Convert settings from H.setup-Object to Map
      * This is a IIFE to keep complexity low.
+     * @param {object} H Hyphenopoly shortcut
      */
     ((H) => {
         /**
          * Create a Map with a default Map behind the scenes. This mimics
          * kind of a prototype chain of an object, but without the object-
          * injection security risk.
-         *
          * @param {Map} defaultsMap - A Map with default values
          * @returns {Proxy} - A Proxy for the Map (dot-notation or get/set)
          */
@@ -91,8 +98,8 @@
 
             /**
              * The get-trap: get the value from userMap or else from defaults
-             * @param {Sring} key - The key to retrieve the value for
-             * @returns {*}
+             * @param {string} key - The key to retrieve the value for
+             * @returns {*} - value
              */
             function get(key) {
                 return (userMap.has(key))
@@ -102,14 +109,14 @@
 
             /**
              * The set-trap: set the value to userMap and don't touch defaults
-             * @param {Sring} key - The key for the value
+             * @param {string} key - The key for the value
              * @param {*} value - The value
-             * @returns {*}
              */
             function set(key, value) {
                 userMap.set(key, value);
             }
             return new Proxy(defaultsMap, {
+                // eslint-disable-next-line jsdoc/require-jsdoc
                 "get": (_target, prop) => {
                     if (prop === "set") {
                         return set;
@@ -119,6 +126,7 @@
                     }
                     return get(prop);
                 },
+                // eslint-disable-next-line jsdoc/require-jsdoc
                 "ownKeys": () => {
                     return [
                         ...new Set(
@@ -212,16 +220,11 @@
         const C = H.c;
         let mainLanguage = null;
 
-        event.fire(
-            "hyphenopolyStart",
-            {
-                "msg": "hyphenopolyStart"
-            }
-        );
+        event.fire("hyphenopolyStart");
 
         /**
          * Factory for elements
-         * @returns {Object} elements-object
+         * @returns {object} elements-object
          */
         function makeElementCollection() {
             const list = new Map();
@@ -237,7 +240,7 @@
              * @param {object} el The element
              * @param {string} lang The language of the element
              * @param {string} sel The selector of the element
-             * @returns {Object} An element-object
+             * @returns {object} An element-object
              */
             function add(el, lang, sel) {
                 const elo = {
@@ -263,14 +266,9 @@
                     list.delete(lang);
                     counter[0] -= langCount;
                     if (counter[0] === 0) {
-                        event.fire(
-                            "hyphenopolyEnd",
-                            {
-                                "msg": "hyphenopolyEnd"
-                            }
-                        );
+                        event.fire("hyphenopolyEnd");
                         if (!C.keepAlive) {
-                            window.Hyphenopoly = null;
+                            w.Hyphenopoly = null;
                         }
                     }
                 }
@@ -286,7 +284,7 @@
 
         /**
          * Get language of element by searching its parents or fallback
-         * @param {Object} el The element
+         * @param {object} el The element
          * @param {string} parentLang Lang of parent if available
          * @param {boolean} fallback Will falback to mainlanguage
          * @returns {string|null} The language or null
@@ -308,9 +306,9 @@
         /**
          * Collect elements that have a selector defined in C.selectors
          * and add them to elements.
-         * @param {Object} [parent = null] The start point element
-         * @param {string} [selector = null] The selector matching the parent
-         * @returns {Object} elements-object
+         * @param {object} parent The start point element
+         * @param {string} selector The selector matching the parent
+         * @returns {object} elements-object
          */
         function collectElements(parent = null, selector = null) {
             const elements = makeElementCollection();
@@ -329,7 +327,7 @@
             /**
              * Recursively walk all elements in el, lending lang and selName
              * add them to elements if necessary.
-             * @param {Object} el The element to scan
+             * @param {object} el The element to scan
              * @param {string} pLang The language of the parent element
              * @param {string} sel The selector of the parent element
              * @param {boolean} isChild If el is a child element
@@ -388,10 +386,10 @@
 
         /**
          * Factory for hyphenatorFunctions for a specific language and selector
-         * @param {Object} lo Language-Object
+         * @param {object} lo Language-Object
          * @param {string} lang The language
          * @param {string} sel The selector
-         * @returns {function} The hyphenate function
+         * @returns {Function} The hyphenate function
          */
         function createWordHyphenator(lo, lang, sel) {
             const poolKey = lang + "-" + sel;
@@ -430,27 +428,19 @@
              * @returns {string} The hyphenated compound word
              */
             function hyphenateCompound(word) {
-                const zeroWidthSpace = "\u200B";
-                let parts = null;
-                let wordHyphenator = null;
-                if (selSettings.compound === "auto" ||
-                    selSettings.compound === "all") {
-                    wordHyphenator = createWordHyphenator(lo, lang, sel);
-                    parts = word.split("-").map((p) => {
-                        if (p.length >= selSettings.minWordLength) {
-                            return wordHyphenator(p);
-                        }
-                        return p;
-                    });
-                    if (selSettings.compound === "auto") {
-                        word = parts.join("-");
-                    } else {
-                        word = parts.join("-" + zeroWidthSpace);
+                let joiner = "-";
+                const parts = word.split(joiner).map((p) => {
+                    if (selSettings.compound !== "hyphen" &&
+                        p.length >= selSettings.minWordLength) {
+                        return createWordHyphenator(lo, lang, sel)(p);
                     }
-                } else {
-                    word = word.replace("-", "-" + zeroWidthSpace);
+                    return p;
+                });
+                if (selSettings.compound !== "auto") {
+                    // Add Zero Width Space
+                    joiner += "\u200B";
                 }
-                return word;
+                return parts.join(joiner);
             }
 
             /**
@@ -481,10 +471,10 @@
                         );
                     } else if (!selSettings.mixedCase && isMixedCase(word)) {
                         hw = word;
-                    } else if (word.indexOf("-") === -1) {
-                        hw = hyphenateNormal(word);
-                    } else {
+                    } else if (word.includes("-")) {
                         hw = hyphenateCompound(word);
+                    } else {
+                        hw = hyphenateNormal(word);
                     }
                     lo.cache.get(sel).set(word, hw);
                 }
@@ -499,7 +489,7 @@
         /**
          * Factory for function that handles orphans
          * @param {string} sel The selector
-         * @returns {function} The function created
+         * @returns {Function} The function created
          */
         function createOrphanController(sel) {
             if (orphanControllerPool.has(sel)) {
@@ -628,7 +618,8 @@
 
         /**
          * Creates a language-specific string hyphenator
-         * @param {String} lang - The language this hyphenator hyphenates
+         * @param {string} lang - The language this hyphenator hyphenates
+         * @returns {Function} hyphenator for strings in the given language
          */
         function createStringHyphenator(lang) {
             return ((entity, sel = ".hyphenate") => {
@@ -644,6 +635,7 @@
 
         /**
          * Creates a polyglot HTML hyphenator
+         * @returns {Function} hyphenator for DOM elements
          */
         function createDOMHyphenator() {
             return ((entity, sel = ".hyphenate") => {
@@ -656,11 +648,18 @@
             });
         }
 
+        /**
+         * Remove hyphenation
+         * @returns {Promise} List of unhyphenated elements
+         */
         H.unhyphenate = () => {
             H.res.els.list.forEach((els) => {
                 els.forEach((elo) => {
-                    const n = elo.element.firstChild;
-                    n.data = n.data.replace(RegExp(C[elo.selector].hyphen, "g"), "");
+                    elo.element.childNodes.forEach((n) => {
+                        if (n.nodeType === 3) {
+                            n.data = n.data.replace(RegExp(C[elo.selector].hyphen, "g"), "");
+                        }
+                    });
                 });
             });
             return Promise.resolve(H.res.els);
@@ -669,8 +668,7 @@
         /**
          * Hyphenate all elements with a given language
          * @param {string} lang The language
-         * @param {Array} elArr Array of elements
-         * @returns {undefined}
+         * @param {Array} elements Array of elements
          */
         function hyphenateLangElements(lang, elements) {
             const elArr = elements.list.get(lang);
@@ -687,14 +685,9 @@
             if (elements.counter[0] === 0) {
                 w.clearTimeout(H.timeOutHandler);
                 H.hide(0, null);
-                event.fire(
-                    "hyphenopolyEnd",
-                    {
-                        "msg": "hyphenopolyEnd"
-                    }
-                );
+                event.fire("hyphenopolyEnd");
                 if (!C.keepAlive) {
-                    window.Hyphenopoly = null;
+                    w.Hyphenopoly = null;
                 }
             }
         }
@@ -702,7 +695,7 @@
         /**
          * Convert the exceptions from user input to Map
          * @param {string} lang - The language for which the Map is created
-         * @return {Map}
+         * @returns {Map} - Exceptions map for given language
          */
         function createExceptionMap(lang) {
             let exc = "";
@@ -727,10 +720,10 @@
         /**
          * Setup lo
          * @param {string} lang The language
-         * @param {function} hyphenateFunction The hyphenateFunction
+         * @param {Function} hyphenateFunction The hyphenateFunction
          * @param {string} alphabet List of used characters
-         * @param {number} leftmin leftmin
-         * @param {number} rightmin rightmin
+         * @param {number} patternLeftmin leftmin
+         * @param {number} patternRightmin rightmin
          * @returns {undefined}
          */
         function prepareLanguagesObj(
@@ -760,9 +753,7 @@
                     Number(selSettings.rightminPerLang.get(lang)) || 0
                 ));
             });
-            if (!H.languages) {
-                H.languages = new Map();
-            }
+            H.languages ||= new Map();
             alphabet = alphabet.replace(/\\*-/g, "\\-");
             H.languages.set(lang, {
                 alphabet,
@@ -773,12 +764,7 @@
                 "reNotAlphabet": RegExp(`[^${alphabet}]`, "i")
             });
             H.hy6ors.get(lang).resolve(createStringHyphenator(lang));
-            event.fire(
-                "engineReady",
-                {
-                    lang
-                }
-            );
+            event.fire("engineReady", {lang});
             if (H.res.els) {
                 hyphenateLangElements(lang, H.res.els);
             }
@@ -794,18 +780,16 @@
         /**
          * Setup env for hyphenateFunction
          * @param {ArrayBuffer} buf Memory buffer
-         * @param {function} hyphenateFunc hyphenateFunction
-         * @returns {function} hyphenateFunction with closured environment
+         * @param {Function} hyphenateFunc hyphenateFunction
+         * @returns {Function} hyphenateFunction with closured environment
          */
         function encloseHyphenateFunction(buf, hyphenateFunc) {
             const wordStore = new Uint16Array(buf, 0, 64);
             return ((word, hyphencc, leftmin, rightmin) => {
                 wordStore.set([
-                    46,
                     ...[...word].map((c) => {
                         return c.charCodeAt(0);
                     }),
-                    46,
                     0
                 ]);
                 const len = hyphenateFunc(leftmin, rightmin, hyphencc);
@@ -820,16 +804,18 @@
 
         /**
          * Instantiate Wasm Engine
+         * @param {Promise} heProm Promised hyphenEngine
          * @param {string} lang The language
          * @returns {undefined}
          */
         function instantiateWasmEngine(heProm, lang) {
-            const wa = window.WebAssembly;
+            const wa = w.WebAssembly;
 
             /**
              * Register character substitutions in the .wasm-hyphenEngine
              * @param {number} alphalen - The length of the alphabet
              * @param {object} exp - Export-object of the hyphenEngine
+             * @returns {number} - The new length of the alphabet
              */
             function registerSubstitutions(alphalen, exp) {
                 if (C.substitute.has(lang)) {
@@ -855,7 +841,6 @@
              */
             function handleWasm(res) {
                 const exp = res.instance.exports;
-                // eslint-disable-next-line multiline-ternary
                 let alphalen = (wa.Global) ? exp.lct.value : exp.lct;
                 alphalen = registerSubstitutions(alphalen, exp);
                 heProm.l.forEach((l) => {
@@ -865,11 +850,9 @@
                             exp.mem.buffer,
                             exp.hyphenate
                         ),
-                        decode(new Uint16Array(exp.mem.buffer, 1280, alphalen)),
-                        /* eslint-disable multiline-ternary */
+                        decode(new Uint16Array(exp.mem.buffer, 1664, alphalen)),
                         (wa.Global) ? exp.lmi.value : exp.lmi,
                         (wa.Global) ? exp.rmi.value : exp.rmi
-                        /* eslint-enable multiline-ternary */
                     );
                 });
             }
@@ -892,6 +875,7 @@
             });
         }
 
+        // eslint-disable-next-line jsdoc/require-jsdoc
         H.main = () => {
             H.res.DOM.then(() => {
                 mainLanguage = getLang(w.document.documentElement, "", false);

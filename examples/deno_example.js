@@ -1,16 +1,21 @@
 // For RunKit:
 // import hyphenopoly from "hyphenopoly";
 
-import hyphenopoly from "../hyphenopoly.deno.js";
+import hyphenopoly from "../hyphenopoly.module.js";
 
 // For local node:
 // import hyphenopoly from "../hyphenopoly.module.js";
+
+function loader(file, patDir) {
+    return Deno.readFile(new URL(file, patDir));
+}
 
 const hyphenator = hyphenopoly.config({
     "exceptions": {
         "en-us": "en-han-ces"
     },
     "hyphen": "•",
+    loader,
     "require": ["de", "en-us"]
 });
 

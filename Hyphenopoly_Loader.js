@@ -1,6 +1,7 @@
 /**
- * @license Hyphenopoly_Loader 5.0.0-beta.5 - client side hyphenation
- * ©2022  Mathias Nater, Güttingen (mathiasnater at gmail dot com)
+ * @license MIT
+ * Hyphenopoly_Loader 6.0.0 - client side hyphenation
+ * ©2024  Mathias Nater, Güttingen (mathiasnater at gmail dot com)
  * https://github.com/mnater/Hyphenopoly
  *
  * Released under the MIT license
@@ -15,7 +16,7 @@ window.Hyphenopoly = {};
     /**
      * Shortcut for new Map
      * @param {any} init - initialiser for new Map
-     * @returns {Map}
+     * @returns {Map} - empty map
      */
     const mp = (init) => {
         return new Map(init);
@@ -42,7 +43,7 @@ window.Hyphenopoly = {};
          *
          * From http://lea.verou.me/2016/12/resolve-promises-externally-with-
          * this-one-weird-trick/
-         * @return {promise}
+         * @returns {Promise} - deferred promise
          */
         const defProm = () => {
             let res = null;
@@ -56,6 +57,12 @@ window.Hyphenopoly = {};
             return promise;
         };
 
+        H.ac = new AbortController();
+        const fetchOptions = {
+            "credentials": H.s.CORScredentials,
+            "signal": H.ac.signal
+        };
+
         let stylesNode = null;
 
         /**
@@ -65,30 +72,24 @@ window.Hyphenopoly = {};
          * each selected element (mode == 1) or
          * text of each selected element (mode == 2) or
          * nothing (mode == -1)
-         * @param {integer} state - State
-         * @param {integer} mode  - Mode
+         * @param {number} state - State
+         * @param {number} mode  - Mode
          */
         H.hide = (state, mode) => {
-            if (state === 0) {
-                if (stylesNode) {
-                    stylesNode.remove();
-                }
-            } else {
-                let vis = "{visibility:hidden!important}";
+            if (state) {
+                const vis = (mode === 2)
+                ? "{color:transparent!important}"
+                : "{visibility:hidden!important}";
+                const myStyle = (mode === 0)
+                    ? "html" + vis
+                    : (mode !== -1)
+                        ? o.keys(H.s.selectors).join(vis) + vis
+                        : "";
                 stylesNode = d[shortcuts.ce]("style");
-                let myStyle = "";
-                if (mode === 0) {
-                    myStyle = "html" + vis;
-                } else if (mode !== -1) {
-                    if (mode === 2) {
-                        vis = "{color:transparent!important}";
-                    }
-                    o.keys(H.s.selectors).forEach((sel) => {
-                        myStyle += sel + vis;
-                    });
-                }
                 stylesNode[shortcuts.ac](d[shortcuts.ct](myStyle));
                 d.head[shortcuts.ac](stylesNode);
+            } else if (stylesNode) {
+                stylesNode.remove();
             }
         };
 
@@ -98,7 +99,7 @@ window.Hyphenopoly = {};
 
                 /**
                  * Append fakeBody with tests to document
-                 * @returns {Object|null} The body element or null, if no tests
+                 * @returns {object|null} The body element or null, if no tests
                  */
                 "ap": () => {
                     if (fakeBody) {
@@ -127,7 +128,7 @@ window.Hyphenopoly = {};
                     if (H.cf.langs.has(lang)) {
                         return;
                     }
-                    fakeBody = fakeBody || d[shortcuts.ce]("body");
+                    fakeBody ||= d[shortcuts.ce]("body");
                     const testDiv = d[shortcuts.ce]("div");
                     const ha = "hyphens:auto";
                     testDiv.lang = lang;
@@ -142,8 +143,8 @@ window.Hyphenopoly = {};
 
         /**
          * Checks if hyphens (ev.prefixed) is set to auto for the element.
-         * @param {Object} elm - the element
-         * @returns {Boolean} result of the check
+         * @param {object} elmStyle - the element
+         * @returns {boolean} result of the check
          */
         const checkCSSHyphensSupport = (elmStyle) => {
             const h = elmStyle.hyphens ||
@@ -175,7 +176,7 @@ window.Hyphenopoly = {};
                     fn,
                     {
                         "l": [lang],
-                        "w": w.fetch(H.paths.patterndir + fn + ".wasm", {"credentials": H.s.CORScredentials})
+                        "w": w.fetch(H.paths.patterndir + fn + ".wasm", fetchOptions)
                     }
                 );
             }
@@ -189,7 +190,7 @@ window.Hyphenopoly = {};
         });
         const testContainer = tester.ap();
         if (testContainer) {
-            testContainer.querySelectorAll("div").forEach((n) => {
+            testContainer.childNodes.forEach((n) => {
                 if (checkCSSHyphensSupport(n.style) && n.offsetHeight > 12) {
                     H.cf.langs.set(n.lang, "CSS");
                 } else {
@@ -217,6 +218,10 @@ window.Hyphenopoly = {};
             H.hide(1, H.s.hide);
             H.timeOutHandler = w.setTimeout(() => {
                 H.hide(0, null);
+                // eslint-disable-next-line no-bitwise
+                if (H.s.timeout & 1) {
+                    H.ac.abort();
+                }
                 // eslint-disable-next-line no-console
                 console.info(scriptName + " timed out.");
             }, H.s.timeout);
@@ -224,10 +229,18 @@ window.Hyphenopoly = {};
                 H.main();
             } else {
                 // Load main script
-                const script = d[shortcuts.ce]("script");
-                script.src = H.paths.maindir + "Hyphenopoly.js";
-                d.head[shortcuts.ac](script);
-                mainScriptLoaded = true;
+                fetch(H.paths.maindir + "Hyphenopoly.js", fetchOptions).
+                    then((response) => {
+                        if (response.ok) {
+                            response.blob().then((blb) => {
+                                const script = d[shortcuts.ce]("script");
+                                script.src = URL.createObjectURL(blb);
+                                d.head[shortcuts.ac](script);
+                                mainScriptLoaded = true;
+                                URL.revokeObjectURL(script.src);
+                            });
+                        }
+                    });
             }
             H.hy6ors = mp();
             H.cf.langs.forEach((langDef, lang) => {
@@ -237,9 +250,21 @@ window.Hyphenopoly = {};
             });
             H.hy6ors.set("HTML", defProm());
             H.hyphenators = new Proxy(H.hy6ors, {
+
+                /**
+                 * Proxy getter
+                 * @param {Map} target - the hy6ors map
+                 * @param {string} key - the language
+                 * @returns {Promise} - Promise for a hyphenator
+                 */
                 "get": (target, key) => {
                     return target.get(key);
                 },
+
+                /**
+                 * Proxy setter, inhibits setting of hyphenators
+                 * @returns {boolean} - allways true
+                 */
                 "set": () => {
                     // Inhibit setting of hyphenators
                     return true;
@@ -270,18 +295,22 @@ window.Hyphenopoly = {};
         })();
     });
 
+    /**
+     * API exposed config
+     * @param {object} c - the user supplied configuration
+     */
     H.config = (c) => {
         /**
          * Sets default properties for an Object
          * @param {object} obj - The object to set defaults to
          * @param {object} defaults - The defaults to set
-         * @returns {object}
+         * @returns {object} the settings in obj complemented with defaults
          */
         const setDefaults = (obj, defaults) => {
             if (obj) {
                 o.entries(defaults).forEach(([k, v]) => {
                     // eslint-disable-next-line security/detect-object-injection
-                    obj[k] = obj[k] || v;
+                    obj[k] ||= v;
                 });
                 return obj;
             }

@@ -1,5 +1,6 @@
 /* eslint-disable security/detect-non-literal-fs-filename */
 /* eslint-env node */
+/* global console */
 
 /**
  * Reads parsed pattern data in JSON format and emits two files:
@@ -22,6 +23,7 @@
  */
 
 import fs from "fs";
+import process from 'node:process';
 import strie from "./modules/sTrie.js";
 const rawInput = fs.readFileSync(process.argv[2]);
 const input = JSON.parse(rawInput);
@@ -49,7 +51,7 @@ const strieDat = strie.dump();
  * Align is 1 = 8bit, 2 = 16bit, 4 = 32bit or 8 = 64bit
  * @param {number} offset - offset before alignment
  * @param {number} align - number of bytes
- * @return {number}
+ * @returns {number} offset
  */
 function alignOffsetTo(offset, align) {
     switch (align) {
@@ -122,7 +124,7 @@ output.set(new Uint8Array(strieDat.values.buffer), valuesOffset);
 fs.writeFileSync(process.argv[3], output);
 
 let imports = "";
-const dataOffset = 1920;
+const dataOffset = 2176;
 imports += `export const ao: i32 = ${alphabetOffset + dataOffset};\n`;
 imports += `export const as: i32 = ${alphabet.length};\n`;
 imports += `export const bm: i32 = ${bitMapOffset + dataOffset};\n`;
